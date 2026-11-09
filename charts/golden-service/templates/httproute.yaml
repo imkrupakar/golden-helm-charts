@@ -1,0 +1,30 @@
+{{- if .Values.route.enabled -}}
+# North-south routing via the Kubernetes Gateway API. TLS is terminated upstream at the external
+# L7 load balancer; this HTTPRoute attaches to the shared platform Istio Gateway and routes the
+# host to this service. No TLS/cert here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "golden-service.name" . }}
+  labels:
+    {{- include "golden-service.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.route.gateway.name }}
+      namespace: {{ .Values.route.gateway.namespace }}
+      {{- with .Values.route.gateway.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  {{- with .Values.route.host }}
+  hostnames:
+    - {{ . | quote }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.route.path | quote }}
+      backendRefs:
+        - name: {{ include "golden-service.name" . }}
+          port: {{ .Values.service.port }}
+{{- end }}

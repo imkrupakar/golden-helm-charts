@@ -1,0 +1,6 @@
+# Which golden-service versions teams may pin as `goldenChart` in their cluster leaves.
+# Enforced on every team-repo PR by platform-gitops/tools/check_team_layout.py, and kept in step
+# with the chart by tests/check_policy.sh (run in this repo's CI and before publishing).
+minimumSupported: "3.0.0" # lowest pin a leaf may use; raising it forces teams to upgrade
+latest: "3.0.0"           # must equal charts/golden-service/Chart.yaml `version`
+deprecated: []            # still allowed, but the checker warns, e.g. ["2.4.0"]

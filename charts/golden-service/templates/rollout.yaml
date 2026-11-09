@@ -1,0 +1,59 @@
+{{- $kind := ternary "Rollout" "Deployment" .Values.rollout.enabled -}}
+{{- $apiVersion := ternary "argoproj.io/v1alpha1" "apps/v1" .Values.rollout.enabled -}}
+apiVersion: {{ $apiVersion }}
+kind: {{ $kind }}
+metadata:
+  name: {{ include "golden-service.name" . }}
+  labels:
+    {{- include "golden-service.labels" . | nindent 4 }}
+spec:
+  {{- /* When the HPA is enabled it owns spec.replicas. Rendering it here too would make Argo CD
+         (selfHeal) reset whatever the HPA scaled to on every sync. */}}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "golden-service.selectorLabels" . | nindent 6 }}
+  {{- if .Values.rollout.enabled }}
+  strategy:
+    {{- toYaml .Values.rollout.strategy | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "golden-service.labels" . | nindent 8 }}
+        {{- with (include "golden-service.identityLabels" . | trim) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "golden-service.name" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ include "golden-service.name" . }}
+          image: {{ include "golden-service.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.externalSecret.enabled }}
+          envFrom:
+            - secretRef:
+                name: {{ include "golden-service.name" . }}-secrets
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.service.targetPort }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.service.targetPort }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -1,0 +1,14 @@
+{{- /*
+Dedicated home namespace for the platform-config release. The Argo CD Application targets this
+namespace (destination.namespace == .Values.releaseNamespace), so the chart owns it explicitly
+rather than leaning on a meaningful-looking fallback like istio-ingress. Resources that belong to
+OTHER namespaces (e.g. the Istio Gateway in istio-ingress) set their own metadata.namespace; see the
+NAMESPACE CONTRACT in values.yaml.
+*/ -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.releaseNamespace }}
+  labels:
+    app.kubernetes.io/managed-by: platform-config
+    istio.io/dataplane-mode: none

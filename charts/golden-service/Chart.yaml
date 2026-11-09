@@ -1,0 +1,6 @@
+apiVersion: v2
+name: golden-service
+description: Org-standard microservice chart (Argo Rollouts, HPA, PDB, ESO)
+type: application
+version: 3.0.0
+appVersion: "1.0.0"

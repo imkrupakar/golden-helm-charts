@@ -1,0 +1,10 @@
+apiVersion: v2
+name: platform-config
+description: >-
+  Platform cluster-wide config bundle, delivered as ONE versioned chart and pinned per cluster
+  (envs/<env>/<cloud>/<region>/versions.yaml: platformConfig). Each concern is a template behind an
+  enabled toggle, so new platform config is added here (new template + chart version bump) rather than
+  as a separate chart. Today: the shared Istio Gateway and the tenant SecretStore admission guard.
+type: application
+version: 0.2.0
+appVersion: "1.0.0"

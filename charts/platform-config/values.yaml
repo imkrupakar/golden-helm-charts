@@ -1,0 +1,41 @@
+# platform-config — one versioned bundle of platform cluster-wide config, pinned per cluster.
+# Every concern is individually toggleable so a piece can soak per environment (e.g. the SecretStore
+# guard can run in Warn mode in sbx and Deny in prd) via per-env value overlays in
+# platform-gitops/config/values-<env>.yaml.
+#
+# NAMESPACE CONTRACT: this umbrella chart may contain resources for ANY namespace, so every
+# namespaced template MUST set its own metadata.namespace (from values) and cluster-scoped resources
+# carry none. The Argo Application's destination namespace (`releaseNamespace` below) is only the
+# Helm release home, never a placement fallback — a CI guard rejects any namespaced resource that
+# omits metadata.namespace.
+
+# Dedicated, chart-owned home namespace for the platform-config release (the Argo Application targets
+# it, and it is the sane default for future namespaced platform config). Not an ingress namespace.
+releaseNamespace: platform-system
+
+# Shared ingress Gateway (Kubernetes Gateway API, implemented by Istio). The external L7 load balancer
+# terminates TLS and forwards cleartext HTTP here, so the listener is plain HTTP:80 (no cert here).
+istioGateway:
+  enabled: true
+  name: platform-gateway
+  namespace: istio-ingress
+  gatewayClassName: istio
+  listener:
+    name: http
+    protocol: HTTP
+    port: 80
+    # Gateway API "from": All | Same | Selector. Team HTTPRoutes attach from any namespace by default.
+    allowedRoutesFrom: All
+
+# Admission guardrail for TEAM-AUTHORED ESO SecretStores (built-in ValidatingAdmissionPolicy, GA in
+# k8s 1.30 — no Kyverno/OPA add-on needed). Applies only to namespaces labelled `tenant`.
+secretstoreGuard:
+  enabled: true
+  name: tenant-secretstore-guard
+  # Fail = reject the request if the policy cannot be evaluated (fail-closed).
+  failurePolicy: Fail
+  # Deny (enforce) or Warn (observe) — use Warn to soak a new rule in sbx before enforcing in prd.
+  validationActions:
+    - Deny
+  # The only ServiceAccount a tenant SecretStore may authenticate through (never `default`).
+  serviceAccountName: eso-reader

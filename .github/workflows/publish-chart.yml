@@ -1,0 +1,71 @@
+# Publishes golden-service as an OCI chart on a `golden-service-vX.Y.Z` tag. Teams pin these versions per
+# cluster, so a published version must never change: the job refuses to overwrite an existing one, and runs
+# the same checks as the PR workflow before pushing.
+name: publish-chart
+on:
+  push:
+    tags:
+      - "golden-service-v*"
+permissions:
+  contents: read
+  packages: write
+env:
+  CHART_REGISTRY: oci://ghcr.io/imkrupakar/charts
+  KUBECONFORM: ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Resolve and verify version
+        id: ver
+        run: |
+          VERSION="${GITHUB_REF_NAME#golden-service-v}"
+          # Enforce SemVer and that the tag matches Chart.yaml (no accidental drift).
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "tag not SemVer: $VERSION"; exit 1; }
+          CHART_VERSION="$(yq '.version' charts/golden-service/Chart.yaml)"
+          [ "$VERSION" = "$CHART_VERSION" ] || { echo "tag $VERSION != Chart.yaml $CHART_VERSION"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Lint
+        run: helm lint --strict charts/golden-service --set image.repository=ghcr.io/example/app --set image.tag=ci
+
+      - name: Support policy + CHANGELOG match this version
+        run: tests/check_policy.sh
+
+      - name: Render scenarios
+        run: tests/render_scenarios.sh
+
+      - name: Validate rendered manifests (kubeconform)
+        run: |
+          # image.repository is required since 2.5.0, so it must be set for the render to succeed.
+          helm template golden charts/golden-service \
+            --set image.repository=ghcr.io/example/app --set image.tag=ci-validate \
+            --set route.enabled=true --set route.host=app.example.com \
+            --set replicaCount=3 --set externalSecret.enabled=true --set externalSecret.storeRef=store \
+          | docker run --rm -i "$KUBECONFORM" -strict -summary -skip CustomResourceDefinition \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+
+      - name: Log in to the registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Refuse to overwrite a published version (immutability)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if helm pull "${CHART_REGISTRY}/golden-service" --version "$VERSION" --destination "$RUNNER_TEMP/existing" >/dev/null 2>&1; then
+            echo "::error::golden-service $VERSION is already published. Published versions are immutable (teams pin them); bump the version instead."
+            exit 1
+          fi
+
+      - name: Package and push to OCI
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          helm package charts/golden-service --version "$VERSION"
+          helm push "golden-service-${VERSION}.tgz" "$CHART_REGISTRY"

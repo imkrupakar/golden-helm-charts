@@ -1,0 +1,53 @@
+# PR check for the golden chart. Before this existed, lint/kubeconform only ran when a release tag was
+# pushed, i.e. after the damage was possible. Teams pin versions per cluster, so what is published must be
+# trustworthy: lint, regression scenarios (HPA/PDB/TLS/identity/image), policy+changelog, schema check.
+name: ci
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  # pinned by digest; bump the tag and digest together
+  KUBECONFORM: ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint (strict)
+        run: helm lint --strict charts/golden-service --set image.repository=ghcr.io/example/app --set image.tag=ci
+      - name: Support policy + CHANGELOG are in step with Chart.yaml
+        run: tests/check_policy.sh
+      - name: Render scenarios (HPA/PDB/TLS/identity/image)
+        run: tests/render_scenarios.sh
+      - name: Schema-check rendered manifests (kubeconform)
+        run: |
+          helm template golden charts/golden-service \
+            --set image.repository=ghcr.io/example/app --set image.tag=ci-validate \
+            --set ingress.enabled=true --set ingress.host=app.example.com --set ingress.clusterIssuer=letsencrypt-staging \
+            --set replicaCount=3 --set externalSecret.enabled=true --set externalSecret.storeRef=store \
+          | docker run --rm -i "$KUBECONFORM" -strict -summary -skip CustomResourceDefinition \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+
+  platform-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint (strict)
+        run: helm lint --strict charts/platform-config
+      - name: Render scenarios (default + guard Warn + gateway off)
+        run: |
+          helm template pc charts/platform-config >/dev/null
+          helm template pc charts/platform-config --set 'secretstoreGuard.validationActions={Warn}' >/dev/null
+          helm template pc charts/platform-config --set istioGateway.enabled=false >/dev/null
+      - name: Namespace contract (every namespaced resource sets metadata.namespace)
+        run: tests/check_namespaces.sh charts/platform-config
+      - name: Schema-check rendered manifests (kubeconform)
+        run: |
+          helm template pc charts/platform-config \
+          | docker run --rm -i "$KUBECONFORM" -strict -summary -ignore-missing-schemas \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -

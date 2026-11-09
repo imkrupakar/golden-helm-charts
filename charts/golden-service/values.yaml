@@ -1,0 +1,98 @@
+# Safe org defaults. Teams override per service/env/cloud/region in their own GitOps repo.
+#
+# Cluster identity injected by the platform ApplicationSet from the cluster's labels. Teams do
+# NOT set these; the chart uses them to render cloud-specific bits (e.g. workload-identity labels).
+global:
+  cloud: ""       # azure | aws | gke
+  region: ""      # eastus | westus | us-east-1 ...
+  environment: "" # sbx | dev | stg | prd
+
+image:
+  repository: "" # REQUIRED, set per service in base/ (nonprod) and per cloud/region for prd
+  tag: "" # SemVer set by the team overlay (CI-updated); never "latest"
+  digest: "" # sha256:... pinned by promotion for immutability; preferred over tag at deploy
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# Progressive delivery via Argo Rollouts. Set to false to emit a plain Deployment.
+rollout:
+  enabled: true
+  strategy:
+    canary:
+      steps:
+        - setWeight: 25
+        - pause: { duration: 60 }
+        - setWeight: 50
+        - pause: { duration: 60 }
+
+service:
+  port: 80
+  targetPort: 8080
+
+# North-south routing via the Kubernetes Gateway API (Istio). TLS is terminated at the external
+# L7 load balancer, so there is no TLS/cert config here. The HTTPRoute attaches to the shared
+# platform Gateway.
+route:
+  enabled: false
+  host: "" # the external hostname routed to this service (optional; empty = match all)
+  path: /
+  gateway:
+    name: platform-gateway
+    namespace: istio-ingress
+    sectionName: "" # optional listener name on the Gateway
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+# Rendered only when it still allows a disruption (minAvailable < the minimum replica count);
+# a single-replica workload therefore gets no PDB.
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# Workload identity: ties the pod SA to a cloud identity (no static secrets).
+# The cloud-specific LABEL (e.g. azure.workload.identity/use) is rendered by the chart from
+# global.cloud. Identity IDs/ARNs go in annotations from the team's cloud/leaf overlay:
+#   azure: azure.workload.identity/client-id   aws: eks.amazonaws.com/role-arn
+#   gke:   iam.gke.io/gcp-service-account
+serviceAccount:
+  create: true
+  annotations: {}
+  labels: {} # extra labels, applied to the ServiceAccount and the pod template
+
+# App secrets are pulled from the tenant's ESO SecretStore into a k8s Secret.
+externalSecret:
+  enabled: false
+  storeRef: "" # e.g. team-alpha-store
+  data: []     # [{ secretKey: DB_PASSWORD, remoteKey: orders-db-password }]
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+env: []
+
+probes:
+  liveness:
+    path: /healthz
+  readiness:
+    path: /ready

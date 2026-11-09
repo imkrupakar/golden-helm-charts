@@ -1,0 +1,25 @@
+{{- if .Values.istioGateway.enabled }}
+# Shared platform ingress Gateway. Istio's Gateway-API deployment controller auto-provisions the
+# data-plane gateway (Deployment + Service) in this namespace; team HTTPRoutes attach via parentRefs.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.istioGateway.namespace }}
+  labels:
+    istio.io/dataplane-mode: none
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.istioGateway.name }}
+  namespace: {{ .Values.istioGateway.namespace }}
+spec:
+  gatewayClassName: {{ .Values.istioGateway.gatewayClassName }}
+  listeners:
+    - name: {{ .Values.istioGateway.listener.name }}
+      protocol: {{ .Values.istioGateway.listener.protocol }}
+      port: {{ .Values.istioGateway.listener.port }}
+      allowedRoutes:
+        namespaces:
+          from: {{ .Values.istioGateway.listener.allowedRoutesFrom }}
+{{- end }}

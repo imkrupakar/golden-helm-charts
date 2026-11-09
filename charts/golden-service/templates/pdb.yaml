@@ -1,0 +1,16 @@
+{{- /* minAvailable >= replicas would allow zero voluntary disruptions and stall node drains/upgrades
+       (e.g. 1 replica with minAvailable 1), so skip the PDB in that case. */ -}}
+{{- $avail := .Values.pdb.minAvailable -}}
+{{- if and .Values.pdb.enabled (or (kindIs "string" $avail) (gt (int (include "golden-service.minReplicas" .)) (int $avail))) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "golden-service.name" . }}
+  labels:
+    {{- include "golden-service.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "golden-service.selectorLabels" . | nindent 6 }}
+{{- end }}
